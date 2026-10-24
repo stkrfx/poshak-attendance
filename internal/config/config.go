@@ -8,8 +8,6 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// Config holds all environment configuration variables for the backend.
-// No credential files are read from disk; JSON keys are loaded directly from env strings.
 type Config struct {
 	Port                        string
 	Env                         string
@@ -26,6 +24,7 @@ type Config struct {
 	SMTPPort                    string
 	SMTPEmail                   string
 	SMTPAppPassword             string
+	EmailWebhookURL             string
 }
 
 func LoadConfig() *Config {
@@ -52,6 +51,7 @@ func LoadConfig() *Config {
 		SMTPPort:                    getEnv("SMTP_PORT", "587"),
 		SMTPEmail:                   getEnv("SMTP_EMAIL", ""),
 		SMTPAppPassword:             getEnv("SMTP_APP_PASSWORD", ""),
+		EmailWebhookURL:             getEnv("EMAIL_WEBHOOK_URL", ""),
 	}
 
 	if cfg.DatabaseURL == "" {
