@@ -1,0 +1,94 @@
+@baseUrl = http://localhost:8080
+@superToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI4NDYxOTcsInByaXYiOiJERVZFTE9QRVIiLCJzdWIiOiJiNTQxNDNiZS03M2ZkLTQxMTAtOTk4Ni1jMTdkZGM0NGM2YzEifQ.Jpp3_qxy_9eMdRibaa9qj-9nswKR_-Aqr5WVy1NdZdg
+@targetUserId = paste_employee_uuid_from_step_3_here
+
+### 1. Bootstrap Initial Developer/Admin Account (Run Once)
+POST {{baseUrl}}/api/v1/super/setup
+Content-Type: application/json
+
+{
+  "setup_secret": "vH6u/jOP=q&.xxrJ}wyb%7t7GXs4Vgx-l/cA@>0XR(qqVyp>K=Lj@kySLHdRBmv?<BnyIt$CZC>uj?7!SM8ZpA",
+  "full_name": "Satyam Kumar",
+  "email": "developer@poshak.com",
+  "mobile_number": "8709782649",
+  "password": "S@ty@m_11",
+  "privilege_level": "DEVELOPER"
+}
+
+### 2. Login as Admin / Developer (Copy super_token from response)
+POST {{baseUrl}}/api/v1/super/login
+Content-Type: application/json
+
+{
+  "email": "developer@poshak.com",
+  "password": "S@ty@m_11"
+}
+
+### 3. Create Shop Employee (Matches Column A in Google Sheets: e.g., "Sajan 2")
+POST {{baseUrl}}/api/v1/super/users
+Authorization: Bearer {{superToken}}
+Content-Type: application/json
+
+{
+  "name": "Sajan",
+  "mobile_number": "8709782651",
+  "gender": "Male",
+  "password": "S@j@n_123"
+}
+
+### 4. List All Shop Employees
+GET {{baseUrl}}/api/v1/super/users
+Authorization: Bearer {{superToken}}
+
+### 5. Trigger Immediate Google Sheets Attendance Sync
+POST {{baseUrl}}/api/v1/super/attendance/sync
+Authorization: Bearer {{superToken}}
+
+### 6. Block an Employee (Immediately revokes all their active phone sessions)
+PATCH {{baseUrl}}/api/v1/super/users/{{targetUserId}}/block
+Authorization: Bearer {{superToken}}
+Content-Type: application/json
+
+{
+  "reason": "Left the shop"
+}
+
+### 7. Unblock an Employee
+PATCH {{baseUrl}}/api/v1/super/users/{{targetUserId}}/unblock
+Authorization: Bearer {{superToken}}
+
+### 8. Developer Moderation (Lock username, purge bad docs, or override locked DOB)
+PATCH {{baseUrl}}/api/v1/super/users/{{targetUserId}}/moderation
+Authorization: Bearer {{superToken}}
+Content-Type: application/json
+
+{
+  "force_username": "sajan_official",
+  "can_edit_username": false,
+  "purge_all_documents": false,
+  "can_upload_documents": true,
+  "override_dob": "2002-05-15"
+}
+
+### 9. Send Broadcast Notification to All Employees
+POST {{baseUrl}}/api/v1/super/notifications
+Authorization: Bearer {{superToken}}
+Content-Type: application/json
+
+{
+  "title": "Diwali Shop Timing Update",
+  "body": "Tomorrow the shop will open at 9:30 AM sharp."
+}
+
+### 10. Publish New APK Version (Triggers Force Update Modal on Android)
+POST {{baseUrl}}/api/v1/super/releases
+Authorization: Bearer {{superToken}}
+Content-Type: application/json
+
+{
+  "version_name": "1.1.0",
+  "version_code": 2,
+  "apk_download_url": "https://example.com/poshak-v1.1.0.apk",
+  "release_notes": "Improved attendance calendar speed and added certificate vault.",
+  "is_force_update": true
+}

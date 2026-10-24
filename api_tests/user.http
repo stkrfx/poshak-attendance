@@ -1,0 +1,139 @@
+@baseUrl = http://localhost:8080
+@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI4MjUyOTUsImlhdCI6MTc5MjgwMzY5NSwic2lkIjoiMzBjODYzNTEtMGVmNy00NDFmLTljMzUtYTMwNTIxZjQ0YTVmIiwic3ViIjoiZmEyNjZmNjYtNGU3MS00Mzc1LThiNGYtZjFiNDY4MGQyNDllIn0.Aj4h-TpEU3a0yZkdHTQrnvp39Wyvn1UQ-XAqGlBWdB4
+@refreshToken = 38802169ce7cf7e193aaded54870c2b969e4bc0631911b6b9889d1c026e9dc72
+@sessionId = 30c86351-0ef7-441f-9c35-a30521f44a5f
+@documentId = paste_document_id_here
+
+### 1. Check Server Health
+GET {{baseUrl}}/health
+
+### 2. Check App Version for Force Update Gate
+GET {{baseUrl}}/api/v1/system/version?version_code=1
+
+### 3. Employee Login (By Mobile Number, Username, or Email)
+POST {{baseUrl}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "identifier": "8709782651",
+  "password": "S@j@n_123",
+  "device_hardware_id": "android_pixel_hw_001",
+  "device_brand": "Google",
+  "device_model": "Pixel 8",
+  "os_version": "Android 15"
+}
+
+### 4. Rotate Refresh Token
+POST {{baseUrl}}/api/v1/auth/refresh
+Content-Type: application/json
+
+{
+  "session_id": "{{sessionId}}",
+  "refresh_token": "{{refreshToken}}"
+}
+
+### 5. Get Employee Profile
+GET {{baseUrl}}/api/v1/profile
+Authorization: Bearer {{accessToken}}
+
+### 6. Update Employee Profile (Set One-Time DOB, Username, Address, Avatar)
+PATCH {{baseUrl}}/api/v1/profile
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "username": "sajan",
+  "dob": "2001-08-12",
+  "address": "Main Market Road, Saharsa, Bihar",
+  "avatar_url": "https://api.dicebear.com/9.x/adventurer/png?seed=Sajan"
+}
+
+### 7. Request 6-Digit Email OTP to Link Email Address
+POST {{baseUrl}}/api/v1/profile/email/send-otp
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "email": "stkrfx@gmail.com"
+}
+
+### 8. Verify 6-Digit Email OTP
+POST {{baseUrl}}/api/v1/profile/email/verify-otp
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "email": "stkrfx@gmail.com",
+  "otp_code": "834947"
+}
+
+### 9. Get Attendance Calendar & Monthly Summary (Current + Previous 2 Months)
+GET {{baseUrl}}/api/v1/attendance
+Authorization: Bearer {{accessToken}}
+
+### 10. Upload Identity Document (PAN, Voter ID, Driving License, or Aadhaar)
+POST {{baseUrl}}/api/v1/documents
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "category": "IDENTITY",
+  "document_type": "PAN",
+  "document_number": "ABCDE1234F",
+  "file_url": "https://example.com/uploads/pan-card.jpg",
+  "mime_type": "image/jpeg"
+}
+
+### 11. Upload Educational Certificate (Requires Institution, Start Date, End Date)
+POST {{baseUrl}}/api/v1/documents
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "category": "CERTIFICATE",
+  "document_type": "GRADUATION",
+  "document_number": "CERT-2026-9981",
+  "institution_name": "IGNOU",
+  "start_date": "2023-07-01",
+  "end_date": "2026-06-30",
+  "file_url": "https://example.com/uploads/graduation-cert.pdf",
+  "mime_type": "application/pdf"
+}
+
+### 12. List All Uploaded Documents & Certificates
+GET {{baseUrl}}/api/v1/documents
+Authorization: Bearer {{accessToken}}
+
+### 13. Delete an Uploaded Document
+DELETE {{baseUrl}}/api/v1/documents/{{documentId}}
+Authorization: Bearer {{accessToken}}
+
+### 14. List Notifications
+GET {{baseUrl}}/api/v1/notifications
+Authorization: Bearer {{accessToken}}
+
+### 15. Mark All Notifications as Read
+POST {{baseUrl}}/api/v1/notifications/read-all
+Authorization: Bearer {{accessToken}}
+
+### 16. Change Password
+POST {{baseUrl}}/api/v1/profile/change-password
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "current_password": "EmployeePass123",
+  "new_password": "EmployeeNewPass456"
+}
+
+### 17. List All Active Logged-In Phones for This Employee
+GET {{baseUrl}}/api/v1/profile/devices
+Authorization: Bearer {{accessToken}}
+
+### 18. Logout All Other Phones (Except Current Phone)
+POST {{baseUrl}}/api/v1/profile/devices/logout-others
+Authorization: Bearer {{accessToken}}
+
+### 19. Logout Current Phone
+POST {{baseUrl}}/api/v1/profile/devices/logout-current
+Authorization: Bearer {{accessToken}}
