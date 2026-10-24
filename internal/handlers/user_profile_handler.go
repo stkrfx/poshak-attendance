@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -53,7 +54,6 @@ func (h *UserProfileHandler) UpdateProfile(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// 1. Handle Username update (if allowed by developer moderation)
 	if req.Username != nil {
 		newUsername := strings.ToLower(strings.TrimSpace(*req.Username))
 		if newUsername != user.Username {
@@ -84,7 +84,6 @@ func (h *UserProfileHandler) UpdateProfile(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	// 2. Handle One-Time Date of Birth (locks permanently once set by employee)
 	if req.DOB != nil && strings.TrimSpace(*req.DOB) != "" {
 		dobStr := strings.TrimSpace(*req.DOB)
 		if user.IsDOBLocked {
@@ -105,7 +104,6 @@ func (h *UserProfileHandler) UpdateProfile(w http.ResponseWriter, r *http.Reques
 		user.IsDOBLocked = true
 	}
 
-	// 3. Handle Address & Avatar URL
 	if req.Address != nil {
 		trimmed := strings.TrimSpace(*req.Address)
 		if trimmed == "" {
@@ -146,9 +144,12 @@ type SendEmailOTPRequest struct {
 
 func (h *UserProfileHandler) SendEmailVerificationOTP(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GetAuthenticatedUser(r)
+	log.Printf("[EMAIL-OTP-HANDLER] Incoming request to send email verification OTP from user_id=%s (username=%s, name=%s)",
+		user.ID, user.Username, user.Name)
 
 	var req SendEmailOTPRequest
 	if err := middleware.DecodeAndValidate(r, &req); err != nil {
+		log.Printf("[EMAIL-OTP-HANDLER] Validation failed for user_id=%s: %v", user.ID, err)
 		middleware.WriteJSON(w, http.StatusBadRequest, middleware.APIResponse{
 			Success: false,
 			Message: "Please enter a valid email address.",
@@ -157,9 +158,12 @@ func (h *UserProfileHandler) SendEmailVerificationOTP(w http.ResponseWriter, r *
 	}
 
 	email := strings.ToLower(strings.TrimSpace(req.Email))
+	log.Printf("[EMAIL-OTP-HANDLER] Checking if email=%s is already in use by another employee...", email)
+
 	var count int64
 	h.db.Model(&models.User{}).Where("LOWER(email) = ? AND id != ?", email, user.ID).Count(&count)
 	if count > 0 {
+		log.Printf("[EMAIL-OTP-HANDLER] Conflict: email=%s is already linked to another user account", email)
 		middleware.WriteJSON(w, http.StatusConflict, middleware.APIResponse{
 			Success: false,
 			Message: "This email address is already linked to another account.",
@@ -168,17 +172,31 @@ func (h *UserProfileHandler) SendEmailVerificationOTP(w http.ResponseWriter, r *
 	}
 
 	otpCode := generateSixDigitOTP()
-	_ = h.db.Delete(&models.EmailOTP{}, "LOWER(email) = ? AND purpose = ?", email, "VERIFY_EMAIL").Error
+	if err := h.db.Delete(&models.EmailOTP{}, "LOWER(email) = ? AND purpose = ?", email, "VERIFY_EMAIL").Error; err != nil {
+		log.Printf("[EMAIL-OTP-DB] Warning while clearing old OTPs for email=%s: %v", email, err)
+	}
 
+	expiresAt := time.Now().UTC().Add(10 * time.Minute)
 	otpEntry := models.EmailOTP{
 		Email:     email,
 		OTPCode:   otpCode,
 		Purpose:   "VERIFY_EMAIL",
-		ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
+		ExpiresAt: expiresAt,
 	}
-	_ = h.db.Create(&otpEntry).Error
+
+	if err := h.db.Create(&otpEntry).Error; err != nil {
+		log.Printf("[EMAIL-OTP-DB] ERROR: Could not save OTP record to PostgreSQL for email=%s: %v", email, err)
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not generate verification code. Please try again.",
+		})
+		return
+	}
+	log.Printf("[EMAIL-OTP-DB] Saved OTP record id=%s for email=%s (expires_at=%s)",
+		otpEntry.ID, email, expiresAt.Format(time.RFC3339))
 
 	if err := h.emailSvc.SendOTP(email, otpCode, "VERIFY_EMAIL"); err != nil {
+		log.Printf("[EMAIL-OTP-HANDLER] ERROR: SMTP SendOTP failed for user_id=%s, email=%s: %v", user.ID, email, err)
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
 			Message: "Failed to send verification code to this email.",
@@ -186,6 +204,7 @@ func (h *UserProfileHandler) SendEmailVerificationOTP(w http.ResponseWriter, r *
 		return
 	}
 
+	log.Printf("[EMAIL-OTP-HANDLER] SUCCESS: OTP sent to email=%s for user_id=%s", email, user.ID)
 	middleware.WriteJSON(w, http.StatusOK, middleware.APIResponse{
 		Success: true,
 		Message: "A 6-digit verification code has been sent to your email.",
@@ -199,9 +218,12 @@ type VerifyEmailOTPRequest struct {
 
 func (h *UserProfileHandler) VerifyEmailOTP(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GetAuthenticatedUser(r)
+	log.Printf("[EMAIL-OTP-VERIFY] Incoming OTP verification request from user_id=%s (username=%s)",
+		user.ID, user.Username)
 
 	var req VerifyEmailOTPRequest
 	if err := middleware.DecodeAndValidate(r, &req); err != nil {
+		log.Printf("[EMAIL-OTP-VERIFY] Validation failed for user_id=%s: %v", user.ID, err)
 		middleware.WriteJSON(w, http.StatusBadRequest, middleware.APIResponse{
 			Success: false,
 			Message: "Please enter the 6-digit code sent to your email.",
@@ -210,9 +232,23 @@ func (h *UserProfileHandler) VerifyEmailOTP(w http.ResponseWriter, r *http.Reque
 	}
 
 	email := strings.ToLower(strings.TrimSpace(req.Email))
+	code := strings.TrimSpace(req.OTPCode)
+	log.Printf("[EMAIL-OTP-VERIFY] Looking up OTP record for email=%s, submitted_code=%s", email, code)
+
 	var otpRecord models.EmailOTP
-	err := h.db.First(&otpRecord, "LOWER(email) = ? AND otp_code = ? AND purpose = ?", email, strings.TrimSpace(req.OTPCode), "VERIFY_EMAIL").Error
-	if err != nil || time.Now().UTC().After(otpRecord.ExpiresAt) {
+	err := h.db.First(&otpRecord, "LOWER(email) = ? AND otp_code = ? AND purpose = ?", email, code, "VERIFY_EMAIL").Error
+	if err != nil {
+		log.Printf("[EMAIL-OTP-VERIFY] FAILED: No matching OTP found in DB for email=%s (err=%v)", email, err)
+		middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+			Success: false,
+			Message: "Invalid or expired 6-digit verification code.",
+		})
+		return
+	}
+
+	if time.Now().UTC().After(otpRecord.ExpiresAt) {
+		log.Printf("[EMAIL-OTP-VERIFY] FAILED: OTP for email=%s expired at %s",
+			email, otpRecord.ExpiresAt.Format(time.RFC3339))
 		middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
 			Success: false,
 			Message: "Invalid or expired 6-digit verification code.",
@@ -223,6 +259,7 @@ func (h *UserProfileHandler) VerifyEmailOTP(w http.ResponseWriter, r *http.Reque
 	user.Email = &email
 	user.UpdatedAt = time.Now().UTC()
 	if err := h.db.Save(&user).Error; err != nil {
+		log.Printf("[EMAIL-OTP-VERIFY] ERROR: Failed to update email column for user_id=%s: %v", user.ID, err)
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
 			Message: "Could not link email address.",
@@ -231,6 +268,7 @@ func (h *UserProfileHandler) VerifyEmailOTP(w http.ResponseWriter, r *http.Reque
 	}
 
 	_ = h.db.Delete(&otpRecord).Error
+	log.Printf("[EMAIL-OTP-VERIFY] SUCCESS: Email=%s verified and saved for user_id=%s", email, user.ID)
 
 	middleware.WriteJSON(w, http.StatusOK, middleware.APIResponse{
 		Success: true,
