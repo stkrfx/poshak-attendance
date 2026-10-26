@@ -90,7 +90,16 @@ func (h *UserAuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rawRefreshToken, refreshHash := generateRefreshTokenPair()
+	rawRefreshToken, refreshHash, err := generateRefreshTokenPair()
+	if err != nil {
+		log.Printf("[LOGIN] Failed to generate secure refresh token: %v", err)
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not start your session. Please try again.",
+		})
+		return
+	}
+
 	sessionID := uuid.New()
 
 	session := models.DeviceSession{
@@ -222,7 +231,18 @@ func (h *UserAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	// Rotate refresh token
 
 	// Rotate refresh token
-	newRawRefresh, newRefreshHash := generateRefreshTokenPair()
+
+	newRawRefresh, newRefreshHash, err := generateRefreshTokenPair()
+	if err != nil {
+		log.Printf("[TOKEN-REFRESH] Failed to generate secure refresh token for session %s: %v",
+			session.ID, err)
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not refresh your session. Please try again.",
+		})
+		return
+	}
+
 	session.RefreshTokenHash = newRefreshHash
 	session.LastActiveAt = time.Now().UTC()
 
@@ -521,11 +541,14 @@ func (h *UserAuthHandler) issueAccessToken(userID, sessionID uuid.UUID) (string,
 	return token.SignedString([]byte(h.cfg.UserJWTSecret))
 }
 
-func generateRefreshTokenPair() (string, string) {
+func generateRefreshTokenPair() (string, string, error) {
 	b := make([]byte, 32)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", err
+	}
+
 	raw := hex.EncodeToString(b)
-	return raw, hashToken(raw)
+	return raw, hashToken(raw), nil
 }
 
 func hashToken(raw string) string {
