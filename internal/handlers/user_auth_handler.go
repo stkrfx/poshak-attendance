@@ -409,10 +409,20 @@ func (h *UserAuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) 
 			})
 			return
 		}
+
 		if err := h.db.First(&user, "mobile_number = ?", mobileNumber).Error; err != nil {
-			middleware.WriteJSON(w, http.StatusNotFound, middleware.APIResponse{
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				middleware.WriteJSON(w, http.StatusNotFound, middleware.APIResponse{
+					Success: false,
+					Message: "No employee account matches this mobile number.",
+				})
+				return
+			}
+
+			log.Printf("[PASSWORD-RESET] Failed to look up account by mobile number: %v", err)
+			middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 				Success: false,
-				Message: "No employee account matches this mobile number.",
+				Message: "Could not process the password reset. Please try again.",
 			})
 			return
 		}
