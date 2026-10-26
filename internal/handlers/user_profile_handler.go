@@ -284,16 +284,32 @@ func (h *UserProfileHandler) VerifyEmailOTP(w http.ResponseWriter, r *http.Reque
 
 	user.Email = &email
 	user.UpdatedAt = time.Now().UTC()
-	if err := h.db.Save(&user).Error; err != nil {
-		log.Printf("[EMAIL-OTP-VERIFY] ERROR: Failed to update email column for user_id=%s: %v", user.ID, err)
+
+	err = h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&user).Error; err != nil {
+			return err
+		}
+
+		result := tx.Delete(&otpRecord)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		log.Printf("[EMAIL-OTP-VERIFY] Failed to save verified email and consume OTP for user_id=%s: %v", user.ID, err)
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
-			Message: "Could not link email address.",
+			Message: "Could not verify and save email address. Please try again.",
 		})
 		return
 	}
 
-	_ = h.db.Delete(&otpRecord).Error
 	log.Printf("[EMAIL-OTP-VERIFY] SUCCESS: Email=%s verified and saved for user_id=%s", email, user.ID)
 
 	middleware.WriteJSON(w, http.StatusOK, middleware.APIResponse{
