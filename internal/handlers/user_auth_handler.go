@@ -207,7 +207,21 @@ func (h *UserAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if user.IsBlocked {
-		_ = h.db.Delete(&models.DeviceSession{}, "user_id = ?", session.UserID).Error
+		if err := h.db.Delete(
+			&models.DeviceSession{},
+			"user_id = ?",
+			session.UserID,
+		).Error; err != nil {
+			log.Printf("[TOKEN-REFRESH] Failed to revoke sessions for blocked user %s: %v",
+				session.UserID, err)
+
+			middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+				Success: false,
+				Message: "Could not validate your session. Please try again.",
+			})
+			return
+		}
+
 		middleware.WriteJSON(w, http.StatusForbidden, middleware.APIResponse{
 			Success: false,
 			Code:    "ACCOUNT_BLOCKED",
