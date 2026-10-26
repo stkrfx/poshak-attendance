@@ -253,8 +253,6 @@ func (h *UserAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 	// Rotate refresh token
 
-	// Rotate refresh token
-
 	newRawRefresh, newRefreshHash, err := generateRefreshTokenPair()
 	if err != nil {
 		log.Printf("[TOKEN-REFRESH] Failed to generate secure refresh token for session %s: %v",
