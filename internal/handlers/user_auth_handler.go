@@ -189,7 +189,19 @@ func (h *UserAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 	var user models.User
 	if err := h.db.First(&user, "id = ?", session.UserID).Error; err != nil {
+
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if deleteErr := h.db.Delete(&session).Error; deleteErr != nil {
+				log.Printf("[TOKEN-REFRESH] Failed to remove session %s for missing user: %v",
+					session.ID, deleteErr)
+
+				middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+					Success: false,
+					Message: "Could not validate your session. Please try again.",
+				})
+				return
+			}
+
 			middleware.WriteJSON(w, http.StatusForbidden, middleware.APIResponse{
 				Success: false,
 				Code:    "ACCOUNT_BLOCKED",
