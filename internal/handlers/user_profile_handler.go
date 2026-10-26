@@ -372,7 +372,28 @@ func (h *UserProfileHandler) LogoutCurrentDevice(w http.ResponseWriter, r *http.
 	user := middleware.GetAuthenticatedUser(r)
 	currentSessionID := middleware.GetAuthenticatedSessionID(r)
 
-	_ = h.db.Delete(&models.DeviceSession{}, "id = ? AND user_id = ?", currentSessionID, user.ID).Error
+	result := h.db.Delete(
+		&models.DeviceSession{},
+		"id = ? AND user_id = ?",
+		currentSessionID,
+		user.ID,
+	)
+	if result.Error != nil {
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not log out from this phone. Please try again.",
+		})
+		return
+	}
+
+	if result.RowsAffected == 0 {
+		middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+			Success: false,
+			Code:    "SESSION_EXPIRED",
+			Message: "This device session has already ended. Please log in again.",
+		})
+		return
+	}
 
 	middleware.WriteJSON(w, http.StatusOK, middleware.APIResponse{
 		Success: true,
