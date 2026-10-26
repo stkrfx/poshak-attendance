@@ -189,20 +189,20 @@ func (h *UserAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	session.RefreshTokenHash = newRefreshHash
 	session.LastActiveAt = time.Now().UTC()
 
-	if err := h.db.Save(&session).Error; err != nil {
-		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
-			Success: false,
-			Code:    "TOKEN_REFRESH_FAILED",
-			Message: "Could not refresh your session. Please try again.",
-		})
-		return
-	}
-
 	newAccessToken, err := h.issueAccessToken(user.ID, session.ID)
 	if err != nil {
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
 			Message: "Could not refresh token.",
+		})
+		return
+	}
+
+	if err := h.db.Save(&session).Error; err != nil {
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Code:    "TOKEN_REFRESH_FAILED",
+			Message: "Could not refresh your session. Please try again.",
 		})
 		return
 	}
