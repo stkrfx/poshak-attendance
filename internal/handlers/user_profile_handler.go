@@ -316,12 +316,20 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 
 	user.PasswordHash = string(hashed)
 	user.UpdatedAt = time.Now().UTC()
-	_ = h.db.Save(&user).Error
+
+	if err := h.db.Save(&user).Error; err != nil {
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not save your new password. Please try again.",
+		})
+		return
+	}
 
 	middleware.WriteJSON(w, http.StatusOK, middleware.APIResponse{
 		Success: true,
 		Message: "Password changed successfully.",
 	})
+
 }
 
 func (h *UserProfileHandler) GetLoggedInDevices(w http.ResponseWriter, r *http.Request) {
