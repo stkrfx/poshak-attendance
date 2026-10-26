@@ -200,8 +200,17 @@ func (h *UserAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 	incomingHash := hashToken(req.RefreshToken)
 	if session.RefreshTokenHash != incomingHash {
-		// Possible token reuse: revoke this device session immediately
-		_ = h.db.Delete(&session).Error
+		// Possible token reuse: revoke this device session immediately.
+		if err := h.db.Delete(&session).Error; err != nil {
+			log.Printf("[TOKEN-REFRESH] Failed to revoke session %s after refresh-token mismatch: %v",
+				session.ID, err)
+			middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+				Success: false,
+				Message: "Could not validate your session. Please try again.",
+			})
+			return
+		}
+
 		middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
 			Success: false,
 			Code:    "INVALID_REFRESH_TOKEN",
