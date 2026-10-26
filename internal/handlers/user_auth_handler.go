@@ -274,6 +274,7 @@ func (h *UserAuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var user models.User
+	var otpRecord models.EmailOTP
 
 	switch req.Method {
 	case "FIREBASE_SMS":
@@ -302,7 +303,6 @@ func (h *UserAuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) 
 
 	case "EMAIL_OTP":
 		email := strings.ToLower(strings.TrimSpace(req.Email))
-		var otpRecord models.EmailOTP
 		err := h.db.First(&otpRecord, "LOWER(email) = ? AND otp_code = ? AND purpose = ?", email, strings.TrimSpace(req.OTPCode), "RESET_PASSWORD").Error
 		if err != nil || time.Now().UTC().After(otpRecord.ExpiresAt) {
 			middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
@@ -318,7 +318,6 @@ func (h *UserAuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) 
 			})
 			return
 		}
-		_ = h.db.Delete(&otpRecord).Error
 	}
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
@@ -332,12 +331,44 @@ func (h *UserAuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) 
 
 	user.PasswordHash = string(hashed)
 	user.UpdatedAt = time.Now().UTC()
-	_ = h.db.Save(&user).Error
+
+	err = h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&user).Error; err != nil {
+			return err
+		}
+
+		if req.Method == "EMAIL_OTP" {
+			result := tx.Delete(
+				&models.EmailOTP{},
+				"id = ? AND purpose = ? AND expires_at > ?",
+				otpRecord.ID,
+				"RESET_PASSWORD",
+				time.Now().UTC(),
+			)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return gorm.ErrRecordNotFound
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+			Success: false,
+			Message: "Password reset could not be completed. Please request a new verification code and try again.",
+		})
+		return
+	}
 
 	middleware.WriteJSON(w, http.StatusOK, middleware.APIResponse{
 		Success: true,
 		Message: "Your password has been updated. You can now log in.",
 	})
+
 }
 
 func (h *UserAuthHandler) issueAccessToken(userID, sessionID uuid.UUID) (string, error) {
