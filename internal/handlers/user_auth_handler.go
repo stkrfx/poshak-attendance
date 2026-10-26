@@ -450,9 +450,18 @@ func (h *UserAuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) 
 	})
 
 	if err != nil {
-		middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+				Success: false,
+				Message: "Password reset could not be completed. Please request a new verification code and try again.",
+			})
+			return
+		}
+
+		log.Printf("[PASSWORD-RESET] Transaction failed while updating password and revoking sessions: %v", err)
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
-			Message: "Password reset could not be completed. Please request a new verification code and try again.",
+			Message: "Could not complete the password reset. Please try again.",
 		})
 		return
 	}
