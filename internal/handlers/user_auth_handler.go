@@ -103,19 +103,19 @@ func (h *UserAuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		LastActiveAt:     time.Now().UTC(),
 	}
 
-	if err := h.db.Create(&session).Error; err != nil {
-		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
-			Success: false,
-			Message: "Could not start your session. Please try again.",
-		})
-		return
-	}
-
 	accessToken, err := h.issueAccessToken(user.ID, session.ID)
 	if err != nil {
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
 			Message: "Could not generate session token.",
+		})
+		return
+	}
+
+	if err := h.db.Create(&session).Error; err != nil {
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not start your session. Please try again.",
 		})
 		return
 	}
