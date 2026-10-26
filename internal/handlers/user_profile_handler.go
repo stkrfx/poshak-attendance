@@ -202,23 +202,8 @@ func (h *UserProfileHandler) SendEmailVerificationOTP(w http.ResponseWriter, r *
 	}
 
 	otpCode := generateSixDigitOTP()
-
-	if err := h.db.Delete(
-		&models.EmailOTP{},
-		"LOWER(email) = ? AND purpose = ?",
-		email,
-		"VERIFY_EMAIL",
-	).Error; err != nil {
-		log.Printf("[EMAIL-OTP-DB] Failed to clear old OTPs for user_id=%s: %v", user.ID, err)
-
-		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
-			Success: false,
-			Message: "Could not generate a new verification code. Please try again.",
-		})
-		return
-	}
-
 	expiresAt := time.Now().UTC().Add(10 * time.Minute)
+
 	otpEntry := models.EmailOTP{
 		Email:     email,
 		OTPCode:   otpCode,
@@ -226,14 +211,31 @@ func (h *UserProfileHandler) SendEmailVerificationOTP(w http.ResponseWriter, r *
 		ExpiresAt: expiresAt,
 	}
 
-	if err := h.db.Create(&otpEntry).Error; err != nil {
-		log.Printf("[EMAIL-OTP-DB] ERROR: Could not save OTP record to PostgreSQL for email=%s: %v", email, err)
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(
+			&models.EmailOTP{},
+			"LOWER(email) = ? AND purpose = ?",
+			email,
+			"VERIFY_EMAIL",
+		).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Create(&otpEntry).Error; err != nil {
+			return err
+		}
+
+		return nil
+	}); err != nil {
+		log.Printf("[EMAIL-OTP-DB] Failed to replace verification OTP for user_id=%s: %v", user.ID, err)
+
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
-			Message: "Could not generate verification code. Please try again.",
+			Message: "Could not generate a verification code. Please try again.",
 		})
 		return
 	}
+
 	log.Printf("[EMAIL-OTP-DB] Saved OTP record id=%s for email=%s (expires_at=%s)",
 		otpEntry.ID, email, expiresAt.Format(time.RFC3339))
 
