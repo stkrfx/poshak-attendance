@@ -355,14 +355,40 @@ func (h *UserAuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) 
 
 	case "EMAIL_OTP":
 		email := strings.ToLower(strings.TrimSpace(req.Email))
-		err := h.db.First(&otpRecord, "LOWER(email) = ? AND otp_code = ? AND purpose = ?", email, strings.TrimSpace(req.OTPCode), "RESET_PASSWORD").Error
-		if err != nil || time.Now().UTC().After(otpRecord.ExpiresAt) {
+
+		err := h.db.First(
+			&otpRecord,
+			"LOWER(email) = ? AND otp_code = ? AND purpose = ?",
+			email,
+			strings.TrimSpace(req.OTPCode),
+			"RESET_PASSWORD",
+		).Error
+
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
 				Success: false,
 				Message: "Invalid or expired 6-digit email code.",
 			})
 			return
 		}
+
+		if err != nil {
+			log.Printf("[PASSWORD-RESET] Failed to look up reset OTP: %v", err)
+			middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+				Success: false,
+				Message: "Could not verify the password-reset code. Please try again.",
+			})
+			return
+		}
+
+		if time.Now().UTC().After(otpRecord.ExpiresAt) {
+			middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+				Success: false,
+				Message: "Invalid or expired 6-digit email code.",
+			})
+			return
+		}
+
 		if err := h.db.First(&user, "LOWER(email) = ?", email).Error; err != nil {
 			middleware.WriteJSON(w, http.StatusNotFound, middleware.APIResponse{
 				Success: false,
