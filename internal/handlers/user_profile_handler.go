@@ -317,17 +317,36 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 	user.PasswordHash = string(hashed)
 	user.UpdatedAt = time.Now().UTC()
 
-	if err := h.db.Save(&user).Error; err != nil {
+	currentSessionID := middleware.GetAuthenticatedSessionID(r)
+
+	err = h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&user).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Delete(
+			&models.DeviceSession{},
+			"user_id = ? AND id != ?",
+			user.ID,
+			currentSessionID,
+		).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
-			Message: "Could not save your new password. Please try again.",
+			Message: "Could not change your password. Please try again.",
 		})
 		return
 	}
 
 	middleware.WriteJSON(w, http.StatusOK, middleware.APIResponse{
 		Success: true,
-		Message: "Password changed successfully.",
+		Message: "Password changed successfully. Other devices have been logged out.",
 	})
 
 }
