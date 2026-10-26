@@ -42,6 +42,9 @@ func (s *EmailService) SendOTP(toEmail, otpCode, purpose string) error {
 	if purpose == "RESET_PASSWORD" {
 		subject = "Poshak Password Reset Code"
 		actionText = "reset your account password"
+	} else if purpose == "DEVICE_LOGOUT" {
+		subject = "Poshak Device Logout Verification Code"
+		actionText = "confirm logging out other devices"
 	}
 
 	plainBody := fmt.Sprintf(

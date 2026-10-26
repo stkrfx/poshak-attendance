@@ -458,6 +458,132 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 
 }
 
+
+// SendDeviceLogoutOTP sends an OTP to the account's verified email before revoking
+// any other device session. The OTP is single-use and expires after ten minutes.
+func (h *UserProfileHandler) SendDeviceLogoutOTP(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetAuthenticatedUser(r)
+	if user.Email == nil || strings.TrimSpace(*user.Email) == "" {
+		middleware.WriteJSON(w, http.StatusBadRequest, middleware.APIResponse{
+			Success: false,
+			Code:    "EMAIL_REQUIRED",
+			Message: "Add and verify an email address before managing other devices.",
+		})
+		return
+	}
+
+	email := strings.ToLower(strings.TrimSpace(*user.Email))
+	code, err := generateSixDigitOTP()
+	if err != nil {
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not generate a verification code. Please try again.",
+		})
+		return
+	}
+
+	entry := models.EmailOTP{
+		Email:     email,
+		OTPCode:   code,
+		Purpose:   "DEVICE_LOGOUT",
+		ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
+	}
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("LOWER(email) = ? AND purpose = ?", email, "DEVICE_LOGOUT").
+			Delete(&models.EmailOTP{}).Error; err != nil {
+			return err
+		}
+		return tx.Create(&entry).Error
+	}); err != nil {
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not prepare a verification code. Please try again.",
+		})
+		return
+	}
+
+	if err := h.emailSvc.SendOTP(email, code, "DEVICE_LOGOUT"); err != nil {
+		_ = h.db.Delete(&entry).Error
+		middleware.WriteJSON(w, http.StatusBadGateway, middleware.APIResponse{
+			Success: false,
+			Code:    "OTP_DELIVERY_FAILED",
+			Message: "Could not send the verification code. Please try again later.",
+		})
+		return
+	}
+
+	middleware.WriteJSON(w, http.StatusOK, middleware.APIResponse{
+		Success: true,
+		Message: "A verification code has been sent to your email.",
+	})
+}
+
+// consumeDeviceLogoutOTP consumes a valid OTP exactly once before any non-current
+// device is revoked. It writes the error response itself when validation fails.
+func (h *UserProfileHandler) consumeDeviceLogoutOTP(w http.ResponseWriter, r *http.Request, user models.User) bool {
+	var req struct {
+		OTPCode string `json:"otp_code" validate:"required,len=6"`
+	}
+	if err := middleware.DecodeAndValidate(r, &req); err != nil {
+		middleware.WriteJSON(w, http.StatusBadRequest, middleware.APIResponse{
+			Success: false,
+			Code:    "INVALID_OTP",
+			Message: "Enter the 6-digit verification code sent to your email.",
+		})
+		return false
+	}
+	if user.Email == nil || strings.TrimSpace(*user.Email) == "" {
+		middleware.WriteJSON(w, http.StatusBadRequest, middleware.APIResponse{
+			Success: false,
+			Code:    "EMAIL_REQUIRED",
+			Message: "Add and verify an email address before managing other devices.",
+		})
+		return false
+	}
+
+	email := strings.ToLower(strings.TrimSpace(*user.Email))
+	var entry models.EmailOTP
+	if err := h.db.First(&entry,
+		"LOWER(email) = ? AND otp_code = ? AND purpose = ?",
+		email, strings.TrimSpace(req.OTPCode), "DEVICE_LOGOUT",
+	).Error; err != nil {
+		middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+			Success: false,
+			Code:    "INVALID_OR_EXPIRED_OTP",
+			Message: "The verification code is invalid or expired. Request a new code and try again.",
+		})
+		return false
+	}
+	if time.Now().UTC().After(entry.ExpiresAt) {
+		_ = h.db.Delete(&entry).Error
+		middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+			Success: false,
+			Code:    "INVALID_OR_EXPIRED_OTP",
+			Message: "The verification code is invalid or expired. Request a new code and try again.",
+		})
+		return false
+	}
+
+	result := h.db.Where("id = ? AND purpose = ? AND expires_at > ?", entry.ID, "DEVICE_LOGOUT", time.Now().UTC()).
+		Delete(&models.EmailOTP{})
+	if result.Error != nil {
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not verify the code. Please try again.",
+		})
+		return false
+	}
+	if result.RowsAffected != 1 {
+		middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+			Success: false,
+			Code:    "INVALID_OR_EXPIRED_OTP",
+			Message: "The verification code is invalid or expired. Request a new code and try again.",
+		})
+		return false
+	}
+	return true
+}
+
 func (h *UserProfileHandler) GetLoggedInDevices(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GetAuthenticatedUser(r)
 	currentSessionID := middleware.GetAuthenticatedSessionID(r)
@@ -538,6 +664,9 @@ func (h *UserProfileHandler) LogoutCurrentDevice(w http.ResponseWriter, r *http.
 func (h *UserProfileHandler) LogoutAllOtherDevices(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GetAuthenticatedUser(r)
 	currentSessionID := middleware.GetAuthenticatedSessionID(r)
+	if !h.consumeDeviceLogoutOTP(w, r, user) {
+		return
+	}
 
 	if err := h.db.Delete(
 		&models.DeviceSession{},
@@ -567,6 +696,18 @@ func (h *UserProfileHandler) LogoutSpecificDevice(w http.ResponseWriter, r *http
 			Success: false,
 			Message: "Invalid device session ID.",
 		})
+		return
+	}
+
+	if targetID == middleware.GetAuthenticatedSessionID(r) {
+		middleware.WriteJSON(w, http.StatusBadRequest, middleware.APIResponse{
+			Success: false,
+			Code:    "CURRENT_SESSION_USE_LOGOUT_CURRENT",
+			Message: "Use the current-device logout action for this phone.",
+		})
+		return
+	}
+	if !h.consumeDeviceLogoutOTP(w, r, user) {
 		return
 	}
 

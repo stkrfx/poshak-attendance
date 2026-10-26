@@ -27,7 +27,7 @@ type AppRelease struct {
 	CreatedAt      time.Time `gorm:"not null;default:now()" json:"created_at"`
 }
 
-// EmailOTP stores 6-digit OTP codes sent via Gmail SMTP for email verification and password reset.
+// EmailOTP stores 6-digit OTP codes for email verification, password reset, and device logout confirmation.
 type EmailOTP struct {
 	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	Email     string    `gorm:"type:varchar(150);not null;index" json:"email"`

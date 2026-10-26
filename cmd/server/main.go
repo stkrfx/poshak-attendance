@@ -77,6 +77,7 @@ func main() {
 	mux.Handle("POST /api/v1/profile/email/verify-otp", userGuard(http.HandlerFunc(userProfileHandler.VerifyEmailOTP)))
 	mux.Handle("POST /api/v1/profile/change-password", userGuard(http.HandlerFunc(userProfileHandler.ChangePassword)))
 	mux.Handle("GET /api/v1/profile/devices", userGuard(http.HandlerFunc(userProfileHandler.GetLoggedInDevices)))
+	mux.Handle("POST /api/v1/profile/devices/send-otp", userGuard(http.HandlerFunc(userProfileHandler.SendDeviceLogoutOTP)))
 	mux.Handle("POST /api/v1/profile/devices/logout-current", userGuard(http.HandlerFunc(userProfileHandler.LogoutCurrentDevice)))
 	mux.Handle("POST /api/v1/profile/devices/logout-others", userGuard(http.HandlerFunc(userProfileHandler.LogoutAllOtherDevices)))
 	mux.Handle("DELETE /api/v1/profile/devices/{session_id}", userGuard(http.HandlerFunc(userProfileHandler.LogoutSpecificDevice)))
