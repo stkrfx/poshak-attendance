@@ -250,7 +250,14 @@ func (h *UserProfileHandler) SendEmailVerificationOTP(w http.ResponseWriter, r *
 		otpEntry.ID, email, expiresAt.Format(time.RFC3339))
 
 	if err := h.emailSvc.SendOTP(email, otpCode, "VERIFY_EMAIL"); err != nil {
-		log.Printf("[EMAIL-OTP-HANDLER] ERROR: SMTP SendOTP failed for user_id=%s, email=%s: %v", user.ID, email, err)
+		log.Printf("[EMAIL-OTP-HANDLER] ERROR: SMTP SendOTP failed for user_id=%s, email=%s: %v",
+			user.ID, email, err)
+
+		if deleteErr := h.db.Delete(&otpEntry, "id = ?", otpEntry.ID).Error; deleteErr != nil {
+			log.Printf("[EMAIL-OTP-DB] Failed to clean up unsent verification OTP id=%s for user_id=%s: %v",
+				otpEntry.ID, user.ID, deleteErr)
+		}
+
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
 			Message: "Failed to send verification code to this email.",
