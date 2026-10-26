@@ -351,6 +351,13 @@ func (h *UserAuthHandler) SendForgotPasswordEmailOTP(w http.ResponseWriter, r *h
 	}
 
 	if err := h.emailSvc.SendOTP(email, otpCode, "RESET_PASSWORD"); err != nil {
+		log.Printf("[PASSWORD-RESET] Failed to send reset OTP email: %v", err)
+
+		if deleteErr := h.db.Delete(&otpEntry, "id = ?", otpEntry.ID).Error; deleteErr != nil {
+			log.Printf("[PASSWORD-RESET] Failed to clean up unsent OTP id=%s: %v",
+				otpEntry.ID, deleteErr)
+		}
+
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
 			Message: "Could not send verification email. Please try mobile verification.",
