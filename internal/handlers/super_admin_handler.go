@@ -156,15 +156,15 @@ func (h *SuperAdminHandler) CreateEmployee(w http.ResponseWriter, r *http.Reques
 	hashed, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 
 	emp := models.User{
-		Name:                strings.TrimSpace(req.Name),
-		Username:            autoUsername,
-		MobileNumber:        strings.TrimSpace(req.MobileNumber),
-		Gender:              strings.TrimSpace(req.Gender),
-		PasswordHash:        string(hashed),
-		IsDOBLocked:         false,
-		CanEditUsername:     true,
-		CanUploadDocuments:  true,
-		IsBlocked:           false,
+		Name:               strings.TrimSpace(req.Name),
+		Username:           autoUsername,
+		MobileNumber:       strings.TrimSpace(req.MobileNumber),
+		Gender:             strings.TrimSpace(req.Gender),
+		PasswordHash:       string(hashed),
+		IsDOBLocked:        false,
+		CanEditProfile:     true,
+		CanUploadDocuments: true,
+		IsBlocked:          false,
 	}
 
 	if err := h.db.Create(&emp).Error; err != nil {
@@ -266,7 +266,7 @@ func (h *SuperAdminHandler) UnblockEmployee(w http.ResponseWriter, r *http.Reque
 
 type DeveloperModerationRequest struct {
 	ForceUsername      *string `json:"force_username,omitempty"`
-	CanEditUsername    *bool   `json:"can_edit_username,omitempty"`
+	CanEditProfile     *bool   `json:"can_edit_profile,omitempty"`
 	PurgeAllDocuments  bool    `json:"purge_all_documents"`
 	CanUploadDocuments *bool   `json:"can_upload_documents,omitempty"`
 	OverrideDOB        *string `json:"override_dob,omitempty"`
@@ -303,8 +303,8 @@ func (h *SuperAdminHandler) ModerateEmployee(w http.ResponseWriter, r *http.Requ
 	if req.ForceUsername != nil && strings.TrimSpace(*req.ForceUsername) != "" {
 		user.Username = strings.ToLower(strings.TrimSpace(*req.ForceUsername))
 	}
-	if req.CanEditUsername != nil {
-		user.CanEditUsername = *req.CanEditUsername
+	if req.CanEditProfile != nil {
+		user.CanEditProfile = *req.CanEditProfile
 	}
 	if req.PurgeAllDocuments {
 		_ = h.db.Delete(&models.UserDocument{}, "user_id = ?", user.ID).Error

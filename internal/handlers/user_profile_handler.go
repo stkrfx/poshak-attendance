@@ -57,10 +57,11 @@ func (h *UserProfileHandler) UpdateProfile(w http.ResponseWriter, r *http.Reques
 	if req.Username != nil {
 		newUsername := strings.ToLower(strings.TrimSpace(*req.Username))
 		if newUsername != user.Username {
-			if !user.CanEditUsername {
+			if !user.CanEditProfile {
 				middleware.WriteJSON(w, http.StatusForbidden, middleware.APIResponse{
 					Success: false,
-					Message: "Your username has been locked and cannot be changed.",
+					Code:    "PROFILE_EDIT_RESTRICTED",
+					Message: "Profile editing has been disabled for your account.",
 				})
 				return
 			}

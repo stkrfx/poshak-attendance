@@ -1,6 +1,7 @@
 package database
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -59,6 +60,34 @@ func ConnectPostgres(databaseURL string) *gorm.DB {
 	)
 	if err != nil {
 		log.Fatalf("CRITICAL: AutoMigrate failed: %v", err)
+	}
+
+	// Migrate the legacy username permission to the new profile permission.
+	err = db.Transaction(func(tx *gorm.DB) error {
+		if !tx.Migrator().HasColumn("users", "can_edit_username") {
+			// Already migrated, or this is a fresh database.
+			return nil
+		}
+
+		if !tx.Migrator().HasColumn("users", "can_edit_profile") {
+			return fmt.Errorf("can_edit_profile column is missing after AutoMigrate")
+		}
+
+		if err := tx.Exec(`
+        UPDATE users
+        SET can_edit_profile = can_edit_username
+    `).Error; err != nil {
+			return fmt.Errorf("copy legacy profile permissions: %w", err)
+		}
+
+		if err := tx.Migrator().DropColumn("users", "can_edit_username").Error; err != nil {
+			return fmt.Errorf("drop legacy username permission: %w", err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		log.Fatalf("CRITICAL: Profile permission migration failed: %v", err)
 	}
 
 	log.Println("Connected to Neon PostgreSQL & verified schema migrations successfully.")

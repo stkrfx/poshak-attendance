@@ -64,7 +64,7 @@ Content-Type: application/json
 
 {
   "force_username": "sajan_official",
-  "can_edit_username": false,
+  "can_edit_profile": false,
   "purge_all_documents": false,
   "can_upload_documents": true,
   "override_dob": "2002-05-15"
