@@ -164,7 +164,18 @@ func (h *UserProfileHandler) SendEmailVerificationOTP(w http.ResponseWriter, r *
 	log.Printf("[EMAIL-OTP-HANDLER] Checking if email=%s is already in use by another employee...", email)
 
 	var count int64
-	h.db.Model(&models.User{}).Where("LOWER(email) = ? AND id != ?", email, user.ID).Count(&count)
+	if err := h.db.Model(&models.User{}).
+		Where("LOWER(email) = ? AND id != ?", email, user.ID).
+		Count(&count).Error; err != nil {
+		log.Printf("[EMAIL-OTP-HANDLER] Failed to check email uniqueness for user_id=%s: %v", user.ID, err)
+
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not verify this email address. Please try again.",
+		})
+		return
+	}
+
 	if count > 0 {
 		log.Printf("[EMAIL-OTP-HANDLER] Conflict: email=%s is already linked to another user account", email)
 		middleware.WriteJSON(w, http.StatusConflict, middleware.APIResponse{
