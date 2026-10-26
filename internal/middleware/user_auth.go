@@ -77,23 +77,34 @@ func UserAuthMiddleware(db *gorm.DB, jwtSecret string) func(http.Handler) http.H
 				return
 			}
 
-			// Immediate Block Check: Reject blocked users with 403 ACCOUNT_BLOCKED
-			if user.IsBlocked {
-				WriteJSON(w, http.StatusForbidden, APIResponse{
-					Success: false,
-					Code:    "ACCOUNT_BLOCKED",
-					Message: "Your account has been restricted by the shop owner.",
-				})
-				return
-			}
-
-			// Verify the device session is still active in PostgreSQL
+			// Validate the device session before returning any account/profile details.
+			// A revoked session must not be able to probe whether an account is blocked.
 			var session models.DeviceSession
 			if err := db.First(&session, "id = ? AND user_id = ?", sessionID, user.ID).Error; err != nil {
 				WriteJSON(w, http.StatusUnauthorized, APIResponse{
 					Success: false,
 					Code:    "SESSION_REVOKED",
 					Message: "This device has been logged out.",
+				})
+				return
+			}
+
+			// Blocked sessions get an explicit status and safe profile payload so the app
+			// can show the required blocked-account screen after local unlock.
+			if user.IsBlocked {
+				blockedReason := "Your account has been restricted by the shop owner."
+				if user.BlockedReason != nil && strings.TrimSpace(*user.BlockedReason) != "" {
+					blockedReason = strings.TrimSpace(*user.BlockedReason)
+				}
+				middlewareData := map[string]interface{}{
+					"blocked_reason": blockedReason,
+					"user":           user,
+				}
+				WriteJSON(w, http.StatusForbidden, APIResponse{
+					Success: false,
+					Code:    "ACCOUNT_BLOCKED",
+					Message: "Your account has been restricted by the shop owner.",
+					Data:    middlewareData,
 				})
 				return
 			}
