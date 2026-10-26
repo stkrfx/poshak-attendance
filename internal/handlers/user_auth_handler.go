@@ -150,11 +150,21 @@ func (h *UserAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 	sessionUUID, _ := uuid.Parse(req.SessionID)
 	var session models.DeviceSession
+
 	if err := h.db.First(&session, "id = ?", sessionUUID).Error; err != nil {
-		middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+				Success: false,
+				Code:    "SESSION_EXPIRED",
+				Message: "Your session has ended. Please log in again.",
+			})
+			return
+		}
+
+		log.Printf("[TOKEN-REFRESH] Failed to look up session %s: %v", sessionUUID, err)
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
-			Code:    "SESSION_EXPIRED",
-			Message: "Your session has ended. Please log in again.",
+			Message: "Could not refresh your session. Please try again.",
 		})
 		return
 	}
