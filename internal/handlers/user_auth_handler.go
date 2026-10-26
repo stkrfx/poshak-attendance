@@ -353,6 +353,11 @@ func (h *UserAuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 
+		if err := tx.Where("user_id = ?", user.ID).
+			Delete(&models.DeviceSession{}).Error; err != nil {
+			return err
+		}
+
 		return nil
 	})
 
