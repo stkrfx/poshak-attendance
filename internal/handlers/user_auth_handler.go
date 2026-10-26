@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -232,11 +233,21 @@ func (h *UserAuthHandler) SendForgotPasswordEmailOTP(w http.ResponseWriter, r *h
 	}
 
 	email := strings.ToLower(strings.TrimSpace(req.Email))
+
 	var user models.User
 	if err := h.db.First(&user, "LOWER(email) = ?", email).Error; err != nil {
-		middleware.WriteJSON(w, http.StatusNotFound, middleware.APIResponse{
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			middleware.WriteJSON(w, http.StatusNotFound, middleware.APIResponse{
+				Success: false,
+				Message: "No employee account found with this email address.",
+			})
+			return
+		}
+
+		log.Printf("[PASSWORD-RESET] Failed to look up account for password reset: %v", err)
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
-			Message: "No employee account found with this email address.",
+			Message: "Could not process your password-reset request. Please try again.",
 		})
 		return
 	}
