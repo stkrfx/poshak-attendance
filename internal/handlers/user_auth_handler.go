@@ -241,7 +241,19 @@ func (h *UserAuthHandler) SendForgotPasswordEmailOTP(w http.ResponseWriter, r *h
 	}
 
 	otpCode := generateSixDigitOTP()
-	_ = h.db.Delete(&models.EmailOTP{}, "LOWER(email) = ? AND purpose = ?", email, "RESET_PASSWORD").Error
+
+	if err := h.db.Delete(
+		&models.EmailOTP{},
+		"LOWER(email) = ? AND purpose = ?",
+		email,
+		"RESET_PASSWORD",
+	).Error; err != nil {
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not prepare a password-reset code. Please try again.",
+		})
+		return
+	}
 
 	otpEntry := models.EmailOTP{
 		Email:     email,
@@ -249,7 +261,14 @@ func (h *UserAuthHandler) SendForgotPasswordEmailOTP(w http.ResponseWriter, r *h
 		Purpose:   "RESET_PASSWORD",
 		ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
 	}
-	_ = h.db.Create(&otpEntry).Error
+
+	if err := h.db.Create(&otpEntry).Error; err != nil {
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not create a password-reset code. Please try again.",
+		})
+		return
+	}
 
 	if err := h.emailSvc.SendOTP(email, otpCode, "RESET_PASSWORD"); err != nil {
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
