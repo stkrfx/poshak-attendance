@@ -201,7 +201,16 @@ func (h *UserProfileHandler) SendEmailVerificationOTP(w http.ResponseWriter, r *
 		return
 	}
 
-	otpCode := generateSixDigitOTP()
+	otpCode, err := generateSixDigitOTP()
+	if err != nil {
+		log.Printf("[EMAIL-OTP-DB] Failed to generate verification OTP for user_id=%s: %v", user.ID, err)
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not generate a verification code. Please try again.",
+		})
+		return
+	}
+
 	expiresAt := time.Now().UTC().Add(10 * time.Minute)
 
 	otpEntry := models.EmailOTP{

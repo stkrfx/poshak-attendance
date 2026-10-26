@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"math/big"
 	"net/http"
 	"strings"
@@ -240,7 +241,15 @@ func (h *UserAuthHandler) SendForgotPasswordEmailOTP(w http.ResponseWriter, r *h
 		return
 	}
 
-	otpCode := generateSixDigitOTP()
+	otpCode, err := generateSixDigitOTP()
+	if err != nil {
+		log.Printf("[PASSWORD-RESET] Failed to generate OTP: %v", err)
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not generate a password-reset code. Please try again.",
+		})
+		return
+	}
 
 	if err := h.db.Delete(
 		&models.EmailOTP{},
@@ -428,10 +437,11 @@ func hashToken(raw string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func generateSixDigitOTP() string {
+func generateSixDigitOTP() (string, error) {
 	n, err := rand.Int(rand.Reader, big.NewInt(900000))
 	if err != nil {
-		return "123456"
+		return "", err
 	}
-	return fmt.Sprintf("%06d", n.Int64()+100000)
+
+	return fmt.Sprintf("%06d", n.Int64()+100000), nil
 }
