@@ -394,11 +394,22 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if len([]byte(req.NewPassword)) > 72 {
+		middleware.WriteJSON(w, http.StatusBadRequest, middleware.APIResponse{
+			Success: false,
+			Message: "Password must not exceed 72 bytes.",
+		})
+		return
+	}
+
 	hashed, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
+		log.Printf("[CHANGE-PASSWORD] Failed to hash new password for user_id=%s: %v",
+			user.ID, err)
+
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
-			Message: "Failed to update password.",
+			Message: "Could not update your password. Please try again.",
 		})
 		return
 	}
