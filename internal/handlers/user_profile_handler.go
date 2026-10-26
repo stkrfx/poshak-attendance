@@ -437,6 +437,9 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 	})
 
 	if err != nil {
+		log.Printf("[CHANGE-PASSWORD] Failed to update password or revoke other sessions for user_id=%s: %v",
+			user.ID, err)
+
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
 			Message: "Could not change your password. Please try again.",
