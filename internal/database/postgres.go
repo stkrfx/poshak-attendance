@@ -63,24 +63,50 @@ func ConnectPostgres(databaseURL string) *gorm.DB {
 	}
 
 	// Migrate the legacy username permission to the new profile permission.
-	err = db.Transaction(func(tx *gorm.DB) error {
-		if !tx.Migrator().HasColumn("users", "can_edit_username") {
+	// Use a fresh session so Transaction starts with an initialized Statement.
+	// This avoids a nil Statement panic in GORM v1.31.x on the root handle.
+	err = db.Session(&gorm.Session{NewDB: true}).Transaction(func(tx *gorm.DB) error {
+		var legacyColumnExists bool
+		if err := tx.Raw(`
+			SELECT EXISTS (
+				SELECT 1 FROM information_schema.columns
+				WHERE table_schema = current_schema()
+				  AND table_name = 'users'
+				  AND column_name = 'can_edit_username'
+			)
+		`).Scan(&legacyColumnExists).Error; err != nil {
+			return fmt.Errorf("check legacy username permission column: %w", err)
+		}
+
+		if !legacyColumnExists {
 			// Already migrated, or this is a fresh database.
 			return nil
 		}
 
-		if !tx.Migrator().HasColumn("users", "can_edit_profile") {
+		var profileColumnExists bool
+		if err := tx.Raw(`
+			SELECT EXISTS (
+				SELECT 1 FROM information_schema.columns
+				WHERE table_schema = current_schema()
+				  AND table_name = 'users'
+				  AND column_name = 'can_edit_profile'
+			)
+		`).Scan(&profileColumnExists).Error; err != nil {
+			return fmt.Errorf("check profile permission column: %w", err)
+		}
+		if !profileColumnExists {
 			return fmt.Errorf("can_edit_profile column is missing after AutoMigrate")
 		}
 
 		if err := tx.Exec(`
-        UPDATE users
-        SET can_edit_profile = can_edit_username
-    `).Error; err != nil {
+			UPDATE users SET can_edit_profile = can_edit_username
+		`).Error; err != nil {
 			return fmt.Errorf("copy legacy profile permissions: %w", err)
 		}
 
-		if err := tx.Migrator().DropColumn("users", "can_edit_username").Error; err != nil {
+		if err := tx.Exec(`
+			ALTER TABLE users DROP COLUMN can_edit_username
+		`).Error; err != nil {
 			return fmt.Errorf("drop legacy username permission: %w", err)
 		}
 
