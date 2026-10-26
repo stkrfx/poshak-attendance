@@ -337,7 +337,15 @@ func (h *UserProfileHandler) GetLoggedInDevices(w http.ResponseWriter, r *http.R
 	currentSessionID := middleware.GetAuthenticatedSessionID(r)
 
 	var sessions []models.DeviceSession
-	_ = h.db.Order("last_active_at DESC").Find(&sessions, "user_id = ?", user.ID).Error
+
+	if err := h.db.Order("last_active_at DESC").
+		Find(&sessions, "user_id = ?", user.ID).Error; err != nil {
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not retrieve your logged-in devices. Please try again.",
+		})
+		return
+	}
 
 	type DeviceItem struct {
 		ID               uuid.UUID `json:"id"`
