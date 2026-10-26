@@ -143,7 +143,11 @@ func (h *UserProfileHandler) UpdateProfile(w http.ResponseWriter, r *http.Reques
 	}
 
 	user.UpdatedAt = time.Now().UTC()
+
 	if err := h.db.Save(&user).Error; err != nil {
+		log.Printf("[PROFILE-UPDATE] Failed to save profile changes for user_id=%s: %v",
+			user.ID, err)
+
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
 			Message: "Could not save profile changes.",
