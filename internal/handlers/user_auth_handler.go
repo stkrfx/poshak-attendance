@@ -390,12 +390,22 @@ func (h *UserAuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) 
 		}
 
 		if err := h.db.First(&user, "LOWER(email) = ?", email).Error; err != nil {
-			middleware.WriteJSON(w, http.StatusNotFound, middleware.APIResponse{
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				middleware.WriteJSON(w, http.StatusNotFound, middleware.APIResponse{
+					Success: false,
+					Message: "Account not found.",
+				})
+				return
+			}
+
+			log.Printf("[PASSWORD-RESET] Failed to look up account after OTP verification: %v", err)
+			middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 				Success: false,
-				Message: "Account not found.",
+				Message: "Could not process the password reset. Please try again.",
 			})
 			return
 		}
+
 	}
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
