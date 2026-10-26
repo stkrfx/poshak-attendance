@@ -74,9 +74,22 @@ func (h *UserProfileHandler) UpdateProfile(w http.ResponseWriter, r *http.Reques
 				})
 				return
 			}
+
 			var count int64
-			h.db.Model(&models.User{}).Where("LOWER(username) = ? AND id != ?", newUsername, user.ID).Count(&count)
+			if err := h.db.Model(&models.User{}).
+				Where("LOWER(username) = ? AND id != ?", newUsername, user.ID).
+				Count(&count).Error; err != nil {
+				log.Printf("[PROFILE-UPDATE] Failed to check username uniqueness for user_id=%s: %v", user.ID, err)
+
+				middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+					Success: false,
+					Message: "Could not verify username availability. Please try again.",
+				})
+				return
+			}
+
 			if count > 0 {
+
 				middleware.WriteJSON(w, http.StatusConflict, middleware.APIResponse{
 					Success: false,
 					Message: "This username is already taken. Please try another.",
