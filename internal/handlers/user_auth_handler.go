@@ -515,11 +515,20 @@ func (h *UserAuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) 
 
 	}
 
+	if len([]byte(req.NewPassword)) > 72 {
+		middleware.WriteJSON(w, http.StatusBadRequest, middleware.APIResponse{
+			Success: false,
+			Message: "Password must not exceed 72 bytes.",
+		})
+		return
+	}
+
 	hashed, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
+		log.Printf("[PASSWORD-RESET] Failed to hash new password: %v", err)
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
-			Message: "Failed to save new password.",
+			Message: "Could not save the new password. Please try again.",
 		})
 		return
 	}
