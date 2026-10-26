@@ -109,13 +109,16 @@ func (h *UserProfileHandler) UpdateProfile(w http.ResponseWriter, r *http.Reques
 			})
 			return
 		}
-		if !datePattern.MatchString(dobStr) {
+
+		parsedDOB, err := time.Parse("2006-01-02", dobStr)
+		if err != nil || parsedDOB.After(time.Now().UTC()) {
 			middleware.WriteJSON(w, http.StatusBadRequest, middleware.APIResponse{
 				Success: false,
-				Message: "Please select a valid date (YYYY-MM-DD).",
+				Message: "Please enter a valid date of birth that is not in the future (YYYY-MM-DD).",
 			})
 			return
 		}
+
 		user.DOB = &dobStr
 		user.IsDOBLocked = true
 	}
