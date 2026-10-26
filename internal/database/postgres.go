@@ -63,8 +63,9 @@ func ConnectPostgres(databaseURL string) *gorm.DB {
 	}
 
 	// Migrate the legacy username permission to the new profile permission.
-	// Use a fresh session so Transaction starts with an initialized Statement.
-	// This avoids a nil Statement panic in GORM v1.31.x on the root handle.
+	// Check the catalog and drop the legacy column with explicit SQL instead
+	// of Migrator.HasColumn/DropColumn: HasColumn suppresses catalog-query
+	// errors, and the previous migrator-based path panicked during deployment.
 	err = db.Session(&gorm.Session{NewDB: true}).Transaction(func(tx *gorm.DB) error {
 		var legacyColumnExists bool
 		if err := tx.Raw(`
