@@ -186,8 +186,20 @@ func (h *UserProfileHandler) SendEmailVerificationOTP(w http.ResponseWriter, r *
 	}
 
 	otpCode := generateSixDigitOTP()
-	if err := h.db.Delete(&models.EmailOTP{}, "LOWER(email) = ? AND purpose = ?", email, "VERIFY_EMAIL").Error; err != nil {
-		log.Printf("[EMAIL-OTP-DB] Warning while clearing old OTPs for email=%s: %v", email, err)
+
+	if err := h.db.Delete(
+		&models.EmailOTP{},
+		"LOWER(email) = ? AND purpose = ?",
+		email,
+		"VERIFY_EMAIL",
+	).Error; err != nil {
+		log.Printf("[EMAIL-OTP-DB] Failed to clear old OTPs for user_id=%s: %v", user.ID, err)
+
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not generate a new verification code. Please try again.",
+		})
+		return
 	}
 
 	expiresAt := time.Now().UTC().Add(10 * time.Minute)
