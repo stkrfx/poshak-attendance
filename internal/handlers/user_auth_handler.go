@@ -262,19 +262,6 @@ func (h *UserAuthHandler) SendForgotPasswordEmailOTP(w http.ResponseWriter, r *h
 		return
 	}
 
-	if err := h.db.Delete(
-		&models.EmailOTP{},
-		"LOWER(email) = ? AND purpose = ?",
-		email,
-		"RESET_PASSWORD",
-	).Error; err != nil {
-		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
-			Success: false,
-			Message: "Could not prepare a password-reset code. Please try again.",
-		})
-		return
-	}
-
 	otpEntry := models.EmailOTP{
 		Email:     email,
 		OTPCode:   otpCode,
@@ -282,10 +269,26 @@ func (h *UserAuthHandler) SendForgotPasswordEmailOTP(w http.ResponseWriter, r *h
 		ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
 	}
 
-	if err := h.db.Create(&otpEntry).Error; err != nil {
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(
+			&models.EmailOTP{},
+			"LOWER(email) = ? AND purpose = ?",
+			email,
+			"RESET_PASSWORD",
+		).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Create(&otpEntry).Error; err != nil {
+			return err
+		}
+
+		return nil
+	}); err != nil {
+		log.Printf("[PASSWORD-RESET] Failed to replace reset OTP: %v", err)
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
-			Message: "Could not create a password-reset code. Please try again.",
+			Message: "Could not prepare a password-reset code. Please try again.",
 		})
 		return
 	}
