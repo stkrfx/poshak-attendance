@@ -436,7 +436,27 @@ func (h *UserProfileHandler) LogoutSpecificDevice(w http.ResponseWriter, r *http
 		return
 	}
 
-	_ = h.db.Delete(&models.DeviceSession{}, "id = ? AND user_id = ?", targetID, user.ID).Error
+	result := h.db.Delete(
+		&models.DeviceSession{},
+		"id = ? AND user_id = ?",
+		targetID,
+		user.ID,
+	)
+	if result.Error != nil {
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not log out the selected device. Please try again.",
+		})
+		return
+	}
+
+	if result.RowsAffected == 0 {
+		middleware.WriteJSON(w, http.StatusNotFound, middleware.APIResponse{
+			Success: false,
+			Message: "The selected device session was not found.",
+		})
+		return
+	}
 
 	middleware.WriteJSON(w, http.StatusOK, middleware.APIResponse{
 		Success: true,
