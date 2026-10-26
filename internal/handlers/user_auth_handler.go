@@ -170,7 +170,25 @@ func (h *UserAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var user models.User
-	if err := h.db.First(&user, "id = ?", session.UserID).Error; err != nil || user.IsBlocked {
+	if err := h.db.First(&user, "id = ?", session.UserID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			middleware.WriteJSON(w, http.StatusForbidden, middleware.APIResponse{
+				Success: false,
+				Code:    "ACCOUNT_BLOCKED",
+				Message: "Your account is not accessible.",
+			})
+			return
+		}
+
+		log.Printf("[TOKEN-REFRESH] Failed to look up user for session %s: %v", session.ID, err)
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not refresh your session. Please try again.",
+		})
+		return
+	}
+
+	if user.IsBlocked {
 		_ = h.db.Delete(&models.DeviceSession{}, "user_id = ?", session.UserID).Error
 		middleware.WriteJSON(w, http.StatusForbidden, middleware.APIResponse{
 			Success: false,
