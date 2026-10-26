@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"regexp"
@@ -289,12 +290,27 @@ func (h *UserProfileHandler) VerifyEmailOTP(w http.ResponseWriter, r *http.Reque
 	log.Printf("[EMAIL-OTP-VERIFY] Looking up OTP record for email=%s", email)
 
 	var otpRecord models.EmailOTP
-	err := h.db.First(&otpRecord, "LOWER(email) = ? AND otp_code = ? AND purpose = ?", email, code, "VERIFY_EMAIL").Error
-	if err != nil {
-		log.Printf("[EMAIL-OTP-VERIFY] FAILED: No matching OTP found in DB for email=%s (err=%v)", email, err)
+	err := h.db.First(
+		&otpRecord,
+		"LOWER(email) = ? AND otp_code = ? AND purpose = ?",
+		email,
+		code,
+		"VERIFY_EMAIL",
+	).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
 			Success: false,
 			Message: "Invalid or expired 6-digit verification code.",
+		})
+		return
+	}
+
+	if err != nil {
+		log.Printf("[EMAIL-OTP-VERIFY] Database error while looking up OTP for user_id=%s: %v", user.ID, err)
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not verify your email code. Please try again.",
 		})
 		return
 	}
