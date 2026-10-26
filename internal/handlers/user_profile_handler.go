@@ -384,7 +384,18 @@ func (h *UserProfileHandler) LogoutAllOtherDevices(w http.ResponseWriter, r *htt
 	user := middleware.GetAuthenticatedUser(r)
 	currentSessionID := middleware.GetAuthenticatedSessionID(r)
 
-	_ = h.db.Delete(&models.DeviceSession{}, "user_id = ? AND id != ?", user.ID, currentSessionID).Error
+	if err := h.db.Delete(
+		&models.DeviceSession{},
+		"user_id = ? AND id != ?",
+		user.ID,
+		currentSessionID,
+	).Error; err != nil {
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not log out other devices. Please try again.",
+		})
+		return
+	}
 
 	middleware.WriteJSON(w, http.StatusOK, middleware.APIResponse{
 		Success: true,
