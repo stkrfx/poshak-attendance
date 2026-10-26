@@ -236,7 +236,7 @@ func (h *UserProfileHandler) VerifyEmailOTP(w http.ResponseWriter, r *http.Reque
 
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	code := strings.TrimSpace(req.OTPCode)
-	log.Printf("[EMAIL-OTP-VERIFY] Looking up OTP record for email=%s, submitted_code=%s", email, code)
+	log.Printf("[EMAIL-OTP-VERIFY] Looking up OTP record for email=%s", email)
 
 	var otpRecord models.EmailOTP
 	err := h.db.First(&otpRecord, "LOWER(email) = ? AND otp_code = ? AND purpose = ?", email, code, "VERIFY_EMAIL").Error
