@@ -66,9 +66,18 @@ func (h *UserAuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	).First(&user).Error
 
 	if err != nil {
-		middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+				Success: false,
+				Message: "Invalid login details. Please check and try again.",
+			})
+			return
+		}
+
+		log.Printf("[LOGIN] Failed to look up user: %v", err)
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
-			Message: "Invalid login details. Please check and try again.",
+			Message: "Could not process your login. Please try again.",
 		})
 		return
 	}
