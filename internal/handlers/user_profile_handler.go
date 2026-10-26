@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"regexp"
@@ -142,7 +143,11 @@ func (h *UserProfileHandler) UpdateProfile(w http.ResponseWriter, r *http.Reques
 	}
 
 	user.UpdatedAt = time.Now().UTC()
+
 	if err := h.db.Save(&user).Error; err != nil {
+		log.Printf("[PROFILE-UPDATE] Failed to save profile changes for user_id=%s: %v",
+			user.ID, err)
+
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
 			Message: "Could not save profile changes.",
@@ -249,7 +254,14 @@ func (h *UserProfileHandler) SendEmailVerificationOTP(w http.ResponseWriter, r *
 		otpEntry.ID, email, expiresAt.Format(time.RFC3339))
 
 	if err := h.emailSvc.SendOTP(email, otpCode, "VERIFY_EMAIL"); err != nil {
-		log.Printf("[EMAIL-OTP-HANDLER] ERROR: SMTP SendOTP failed for user_id=%s, email=%s: %v", user.ID, email, err)
+		log.Printf("[EMAIL-OTP-HANDLER] ERROR: SMTP SendOTP failed for user_id=%s, email=%s: %v",
+			user.ID, email, err)
+
+		if deleteErr := h.db.Delete(&otpEntry, "id = ?", otpEntry.ID).Error; deleteErr != nil {
+			log.Printf("[EMAIL-OTP-DB] Failed to clean up unsent verification OTP id=%s for user_id=%s: %v",
+				otpEntry.ID, user.ID, deleteErr)
+		}
+
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
 			Message: "Failed to send verification code to this email.",
@@ -289,12 +301,27 @@ func (h *UserProfileHandler) VerifyEmailOTP(w http.ResponseWriter, r *http.Reque
 	log.Printf("[EMAIL-OTP-VERIFY] Looking up OTP record for email=%s", email)
 
 	var otpRecord models.EmailOTP
-	err := h.db.First(&otpRecord, "LOWER(email) = ? AND otp_code = ? AND purpose = ?", email, code, "VERIFY_EMAIL").Error
-	if err != nil {
-		log.Printf("[EMAIL-OTP-VERIFY] FAILED: No matching OTP found in DB for email=%s (err=%v)", email, err)
+	err := h.db.First(
+		&otpRecord,
+		"LOWER(email) = ? AND otp_code = ? AND purpose = ?",
+		email,
+		code,
+		"VERIFY_EMAIL",
+	).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
 			Success: false,
 			Message: "Invalid or expired 6-digit verification code.",
+		})
+		return
+	}
+
+	if err != nil {
+		log.Printf("[EMAIL-OTP-VERIFY] Database error while looking up OTP for user_id=%s: %v", user.ID, err)
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not verify your email code. Please try again.",
 		})
 		return
 	}
@@ -371,11 +398,22 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if len([]byte(req.NewPassword)) > 72 {
+		middleware.WriteJSON(w, http.StatusBadRequest, middleware.APIResponse{
+			Success: false,
+			Message: "Password must not exceed 72 bytes.",
+		})
+		return
+	}
+
 	hashed, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
+		log.Printf("[CHANGE-PASSWORD] Failed to hash new password for user_id=%s: %v",
+			user.ID, err)
+
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
-			Message: "Failed to update password.",
+			Message: "Could not update your password. Please try again.",
 		})
 		return
 	}
@@ -403,6 +441,9 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 	})
 
 	if err != nil {
+		log.Printf("[CHANGE-PASSWORD] Failed to update password or revoke other sessions for user_id=%s: %v",
+			user.ID, err)
+
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
 			Message: "Could not change your password. Please try again.",

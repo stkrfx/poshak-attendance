@@ -66,9 +66,18 @@ func (h *UserAuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	).First(&user).Error
 
 	if err != nil {
-		middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+				Success: false,
+				Message: "Invalid login details. Please check and try again.",
+			})
+			return
+		}
+
+		log.Printf("[LOGIN] Failed to look up user: %v", err)
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
-			Message: "Invalid login details. Please check and try again.",
+			Message: "Could not process your login. Please try again.",
 		})
 		return
 	}
@@ -90,7 +99,16 @@ func (h *UserAuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rawRefreshToken, refreshHash := generateRefreshTokenPair()
+	rawRefreshToken, refreshHash, err := generateRefreshTokenPair()
+	if err != nil {
+		log.Printf("[LOGIN] Failed to generate secure refresh token: %v", err)
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not start your session. Please try again.",
+		})
+		return
+	}
+
 	sessionID := uuid.New()
 
 	session := models.DeviceSession{
@@ -150,18 +168,72 @@ func (h *UserAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 	sessionUUID, _ := uuid.Parse(req.SessionID)
 	var session models.DeviceSession
+
 	if err := h.db.First(&session, "id = ?", sessionUUID).Error; err != nil {
-		middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+				Success: false,
+				Code:    "SESSION_EXPIRED",
+				Message: "Your session has ended. Please log in again.",
+			})
+			return
+		}
+
+		log.Printf("[TOKEN-REFRESH] Failed to look up session %s: %v", sessionUUID, err)
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
-			Code:    "SESSION_EXPIRED",
-			Message: "Your session has ended. Please log in again.",
+			Message: "Could not refresh your session. Please try again.",
 		})
 		return
 	}
 
 	var user models.User
-	if err := h.db.First(&user, "id = ?", session.UserID).Error; err != nil || user.IsBlocked {
-		_ = h.db.Delete(&models.DeviceSession{}, "user_id = ?", session.UserID).Error
+	if err := h.db.First(&user, "id = ?", session.UserID).Error; err != nil {
+
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if deleteErr := h.db.Delete(&session).Error; deleteErr != nil {
+				log.Printf("[TOKEN-REFRESH] Failed to remove session %s for missing user: %v",
+					session.ID, deleteErr)
+
+				middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+					Success: false,
+					Message: "Could not validate your session. Please try again.",
+				})
+				return
+			}
+
+			middleware.WriteJSON(w, http.StatusForbidden, middleware.APIResponse{
+				Success: false,
+				Code:    "ACCOUNT_BLOCKED",
+				Message: "Your account is not accessible.",
+			})
+			return
+		}
+
+		log.Printf("[TOKEN-REFRESH] Failed to look up user for session %s: %v", session.ID, err)
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Message: "Could not refresh your session. Please try again.",
+		})
+		return
+	}
+
+	if user.IsBlocked {
+		if err := h.db.Delete(
+			&models.DeviceSession{},
+			"user_id = ?",
+			session.UserID,
+		).Error; err != nil {
+			log.Printf("[TOKEN-REFRESH] Failed to revoke sessions for blocked user %s: %v",
+				session.UserID, err)
+
+			middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+				Success: false,
+				Message: "Could not validate your session. Please try again.",
+			})
+			return
+		}
+
 		middleware.WriteJSON(w, http.StatusForbidden, middleware.APIResponse{
 			Success: false,
 			Code:    "ACCOUNT_BLOCKED",
@@ -172,8 +244,17 @@ func (h *UserAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 	incomingHash := hashToken(req.RefreshToken)
 	if session.RefreshTokenHash != incomingHash {
-		// Possible token reuse: revoke this device session immediately
-		_ = h.db.Delete(&session).Error
+		// Possible token reuse: revoke this device session immediately.
+		if err := h.db.Delete(&session).Error; err != nil {
+			log.Printf("[TOKEN-REFRESH] Failed to revoke session %s after refresh-token mismatch: %v",
+				session.ID, err)
+			middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+				Success: false,
+				Message: "Could not validate your session. Please try again.",
+			})
+			return
+		}
+
 		middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
 			Success: false,
 			Code:    "INVALID_REFRESH_TOKEN",
@@ -184,25 +265,34 @@ func (h *UserAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 	// Rotate refresh token
 
-	// Rotate refresh token
-	newRawRefresh, newRefreshHash := generateRefreshTokenPair()
-	session.RefreshTokenHash = newRefreshHash
-	session.LastActiveAt = time.Now().UTC()
-
-	if err := h.db.Save(&session).Error; err != nil {
+	newRawRefresh, newRefreshHash, err := generateRefreshTokenPair()
+	if err != nil {
+		log.Printf("[TOKEN-REFRESH] Failed to generate secure refresh token for session %s: %v",
+			session.ID, err)
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
-			Code:    "TOKEN_REFRESH_FAILED",
 			Message: "Could not refresh your session. Please try again.",
 		})
 		return
 	}
+
+	session.RefreshTokenHash = newRefreshHash
+	session.LastActiveAt = time.Now().UTC()
 
 	newAccessToken, err := h.issueAccessToken(user.ID, session.ID)
 	if err != nil {
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
 			Message: "Could not refresh token.",
+		})
+		return
+	}
+
+	if err := h.db.Save(&session).Error; err != nil {
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
+			Success: false,
+			Code:    "TOKEN_REFRESH_FAILED",
+			Message: "Could not refresh your session. Please try again.",
 		})
 		return
 	}
@@ -294,6 +384,13 @@ func (h *UserAuthHandler) SendForgotPasswordEmailOTP(w http.ResponseWriter, r *h
 	}
 
 	if err := h.emailSvc.SendOTP(email, otpCode, "RESET_PASSWORD"); err != nil {
+		log.Printf("[PASSWORD-RESET] Failed to send reset OTP email: %v", err)
+
+		if deleteErr := h.db.Delete(&otpEntry, "id = ?", otpEntry.ID).Error; deleteErr != nil {
+			log.Printf("[PASSWORD-RESET] Failed to clean up unsent OTP id=%s: %v",
+				otpEntry.ID, deleteErr)
+		}
+
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
 			Message: "Could not send verification email. Please try mobile verification.",
@@ -345,10 +442,20 @@ func (h *UserAuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) 
 			})
 			return
 		}
+
 		if err := h.db.First(&user, "mobile_number = ?", mobileNumber).Error; err != nil {
-			middleware.WriteJSON(w, http.StatusNotFound, middleware.APIResponse{
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				middleware.WriteJSON(w, http.StatusNotFound, middleware.APIResponse{
+					Success: false,
+					Message: "No employee account matches this mobile number.",
+				})
+				return
+			}
+
+			log.Printf("[PASSWORD-RESET] Failed to look up account by mobile number: %v", err)
+			middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 				Success: false,
-				Message: "No employee account matches this mobile number.",
+				Message: "Could not process the password reset. Please try again.",
 			})
 			return
 		}
@@ -408,11 +515,20 @@ func (h *UserAuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) 
 
 	}
 
+	if len([]byte(req.NewPassword)) > 72 {
+		middleware.WriteJSON(w, http.StatusBadRequest, middleware.APIResponse{
+			Success: false,
+			Message: "Password must not exceed 72 bytes.",
+		})
+		return
+	}
+
 	hashed, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
+		log.Printf("[PASSWORD-RESET] Failed to hash new password: %v", err)
 		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
-			Message: "Failed to save new password.",
+			Message: "Could not save the new password. Please try again.",
 		})
 		return
 	}
@@ -450,9 +566,18 @@ func (h *UserAuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) 
 	})
 
 	if err != nil {
-		middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			middleware.WriteJSON(w, http.StatusUnauthorized, middleware.APIResponse{
+				Success: false,
+				Message: "Password reset could not be completed. Please request a new verification code and try again.",
+			})
+			return
+		}
+
+		log.Printf("[PASSWORD-RESET] Transaction failed while updating password and revoking sessions: %v", err)
+		middleware.WriteJSON(w, http.StatusInternalServerError, middleware.APIResponse{
 			Success: false,
-			Message: "Password reset could not be completed. Please request a new verification code and try again.",
+			Message: "Could not complete the password reset. Please try again.",
 		})
 		return
 	}
@@ -475,11 +600,14 @@ func (h *UserAuthHandler) issueAccessToken(userID, sessionID uuid.UUID) (string,
 	return token.SignedString([]byte(h.cfg.UserJWTSecret))
 }
 
-func generateRefreshTokenPair() (string, string) {
+func generateRefreshTokenPair() (string, string, error) {
 	b := make([]byte, 32)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", err
+	}
+
 	raw := hex.EncodeToString(b)
-	return raw, hashToken(raw)
+	return raw, hashToken(raw), nil
 }
 
 func hashToken(raw string) string {
