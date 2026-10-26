@@ -45,6 +45,15 @@ type UpdateProfileRequest struct {
 func (h *UserProfileHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GetAuthenticatedUser(r)
 
+	if !user.CanEditProfile {
+		middleware.WriteJSON(w, http.StatusForbidden, middleware.APIResponse{
+			Success: false,
+			Code:    "PROFILE_EDIT_RESTRICTED",
+			Message: "Profile editing has been disabled for your account.",
+		})
+		return
+	}
+
 	var req UpdateProfileRequest
 	if err := middleware.DecodeAndValidate(r, &req); err != nil {
 		middleware.WriteJSON(w, http.StatusBadRequest, middleware.APIResponse{
@@ -57,14 +66,7 @@ func (h *UserProfileHandler) UpdateProfile(w http.ResponseWriter, r *http.Reques
 	if req.Username != nil {
 		newUsername := strings.ToLower(strings.TrimSpace(*req.Username))
 		if newUsername != user.Username {
-			if !user.CanEditProfile {
-				middleware.WriteJSON(w, http.StatusForbidden, middleware.APIResponse{
-					Success: false,
-					Code:    "PROFILE_EDIT_RESTRICTED",
-					Message: "Profile editing has been disabled for your account.",
-				})
-				return
-			}
+
 			if !usernamePattern.MatchString(newUsername) {
 				middleware.WriteJSON(w, http.StatusBadRequest, middleware.APIResponse{
 					Success: false,
